@@ -1,0 +1,5 @@
+sdv==1.35.1
+fastapi==0.115.12
+python-multipart==0.0.20
+uvicorn[standard]==0.34.0
+pandas==2.2.3
