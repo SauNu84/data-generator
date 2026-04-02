@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600">
+  <!-- Background -->
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f8fafc"/>
+      <stop offset="100%" style="stop-color:#eef2ff"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="600" fill="url(#bg)"/>
+
+  <!-- Card -->
+  <rect x="150" y="80" width="500" height="440" rx="16" fill="white" stroke="#e2e8f0" stroke-width="1.5" filter="url(#shadow)"/>
+
+  <!-- Title -->
+  <text x="400" y="50" text-anchor="middle" font-family="system-ui, sans-serif" font-size="22" font-weight="700" fill="#111827">Synthetic Data Generator</text>
+  <text x="400" y="72" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" fill="#6b7280">Upload a CSV, tweak the schema, and generate a privacy-safe synthetic copy.</text>
+
+  <!-- Drop zone -->
+  <rect x="190" y="120" width="420" height="200" rx="12" fill="#f8fafc" stroke="#818cf8" stroke-width="2" stroke-dasharray="8,4"/>
+
+  <!-- Upload icon -->
+  <g transform="translate(370, 170)">
+    <circle cx="30" cy="30" r="28" fill="#eef2ff"/>
+    <path d="M30 42 L30 20 M22 28 L30 20 L38 28" stroke="#6366f1" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <rect x="18" y="42" width="24" height="4" rx="2" fill="#6366f1" opacity="0.3"/>
+  </g>
+
+  <text x="400" y="242" text-anchor="middle" font-family="system-ui, sans-serif" font-size="15" font-weight="600" fill="#374151">Drop your CSV here</text>
+  <text x="400" y="262" text-anchor="middle" font-family="system-ui, sans-serif" font-size="13" fill="#9ca3af">or click to browse</text>
+  <text x="400" y="288" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#d1d5db">Max 50MB · 100k rows</text>
+
+  <!-- Constraints -->
+  <rect x="190" y="340" width="420" height="60" rx="10" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1"/>
+  <text x="210" y="363" font-family="system-ui, sans-serif" font-size="12" fill="#166534" font-weight="600">Supported formats</text>
+  <text x="210" y="382" font-family="system-ui, sans-serif" font-size="12" fill="#15803d">CSV with headers · UTF-8 encoding · Numeric, categorical, datetime columns</text>
+
+  <!-- Feature chips -->
+  <rect x="190" y="420" width="120" height="28" rx="14" fill="#eef2ff"/>
+  <text x="250" y="438" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#4338ca">No login required</text>
+
+  <rect x="320" y="420" width="120" height="28" rx="14" fill="#f0fdf4"/>
+  <text x="380" y="438" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#166534">Privacy-safe</text>
+
+  <rect x="450" y="420" width="130" height="28" rx="14" fill="#fef9c3"/>
+  <text x="515" y="438" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#854d0e">AI-powered quality</text>
+
+  <!-- Browser chrome hint -->
+  <text x="400" y="558" text-anchor="middle" font-family="system-ui, sans-serif" font-size="11" fill="#9ca3af">localhost:3000</text>
+</svg>
