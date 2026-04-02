@@ -9,22 +9,22 @@ Free, developer-first CSV → synthetic CSV generator. Upload a real dataset, re
 ### 1. Upload
 Drop any CSV (≤ 50 MB, 100k rows) directly onto the page — no account needed.
 
-![Upload page](docs/screenshots/01-upload.svg)
+![Upload page](docs/screenshots/01-upload.png)
 
 ### 2. Schema Review
 Auto-inferred column types (numerical, categorical, datetime, ID). Override any column before generating.
 
-![Schema review](docs/screenshots/02-schema-review.svg)
+![Schema review](docs/screenshots/02-schema-review.png)
 
 ### 3. Results & Quality Score
 Async results page with live polling. Overall quality score + per-column breakdown. Shareable URL, 24-hour download TTL.
 
-![Results page](docs/screenshots/03-results.svg)
+![Results page](docs/screenshots/03-results.png)
 
 ### 4. Architecture
 7-service Docker Compose stack — single command to run everything locally.
 
-![Architecture diagram](docs/screenshots/04-architecture.svg)
+![Architecture diagram](docs/screenshots/04-architecture.png)
 
 ---
 
