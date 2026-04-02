@@ -23,13 +23,12 @@ from app.config import settings
 from app.database import AsyncSessionLocal, engine, get_db
 from app.models import Base, Dataset, GenerationJob
 from app.schemas import (
+    ColumnQuality,
     ColumnSchema,
     DownloadResponse,
     GenerateRequest,
     GenerateResponse,
     JobStatusResponse,
-    QualityScore,
-    ColumnQuality,
     UploadResponse,
 )
 from app.storage import ensure_bucket, generate_presigned_url, upload_csv_bytes
@@ -146,7 +145,7 @@ async def upload_csv(
         dataset_id=dataset.id,
         original_filename=dataset.original_filename,
         row_count=dataset.row_count,
-        schema=schema,
+        columns=schema,
     )
 
 
@@ -179,6 +178,7 @@ async def start_generation(
         str(req.dataset_id),
         req.model_type,
         req.num_rows,
+        req.schema_overrides,
     )
 
     return GenerateResponse(
@@ -200,13 +200,20 @@ async def get_job_status(
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found.")
 
-    quality = None
+    quality_score: float | None = None
+    column_quality: list[ColumnQuality] | None = None
     if job.quality_score_json:
         q = job.quality_score_json
-        quality = QualityScore(
-            overall=q["overall"],
-            columns=[ColumnQuality(**c) for c in q.get("columns", [])],
-        )
+        quality_score = q.get("overall")
+        cols = q.get("columns", [])
+        column_quality = [ColumnQuality(**c) for c in cols] if cols else None
+
+    download_url: str | None = None
+    if job.status == "done" and job.output_s3_key:
+        try:
+            download_url = generate_presigned_url(job.output_s3_key)
+        except Exception:
+            pass  # non-fatal; client can call /download endpoint directly
 
     return JobStatusResponse(
         job_id=job.id,
@@ -214,8 +221,10 @@ async def get_job_status(
         status=job.status,
         model_type=job.model_type,
         requested_rows=job.requested_rows,
-        quality_score=quality,
-        error_detail=job.error_detail,
+        quality_score=quality_score,
+        column_quality=column_quality,
+        error=job.error_detail,
+        download_url=download_url,
         expires_at=job.expires_at,
         created_at=job.created_at,
         completed_at=job.completed_at,

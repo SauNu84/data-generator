@@ -21,8 +21,8 @@ async def test_upload_happy_path(client, sample_csv_bytes):
     assert "dataset_id" in body
     assert body["original_filename"] == "data.csv"
     assert body["row_count"] == 10
-    assert len(body["schema"]) == 3
-    cols = {c["name"] for c in body["schema"]}
+    assert len(body["columns"]) == 3
+    cols = {c["name"] for c in body["columns"]}
     assert cols == {"age", "income", "category"}
 
 

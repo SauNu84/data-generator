@@ -9,7 +9,7 @@ import pytest
 
 @pytest.mark.anyio
 async def test_get_failed_job_shows_error_detail(client, db_session):
-    """A failed job must expose error_detail and null quality_score."""
+    """A failed job must expose error (not error_detail) and null quality_score."""
     from app.models import Dataset, GenerationJob
 
     dataset = Dataset(
@@ -39,7 +39,7 @@ async def test_get_failed_job_shows_error_detail(client, db_session):
     body = resp.json()
     assert body["status"] == "failed"
     assert body["quality_score"] is None
-    assert "singular covariance" in body["error_detail"]
+    assert "singular covariance" in body["error"]
 
 
 @pytest.mark.anyio
@@ -156,9 +156,11 @@ async def test_shareable_url_accessible(client, db_session):
     db_session.add(job)
     await db_session.commit()
 
+    fake_url = "http://minio:9000/share_result.csv?sig=x"
     # Access the job URL directly — no auth, no prior upload in this request
-    resp = await client.get(f"/api/jobs/{job.id}")
+    with patch("app.main.generate_presigned_url", return_value=fake_url):
+        resp = await client.get(f"/api/jobs/{job.id}")
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "done"
-    assert body["quality_score"]["overall"] == 82.0
+    assert body["quality_score"] == 82.0

@@ -28,12 +28,12 @@ export default function UploadPage() {
     try {
       const result = await uploadCSV(file);
       setDatasetId(result.dataset_id);
-      setSchema(result.schema);
+      setSchema(result.columns);
       setSourceRowCount(result.row_count);
       setRowCount(result.row_count);
       setOverrides({});
       setStage("schema");
-      track("upload_success", { row_count: result.row_count, columns: result.schema.length });
+      track("upload_success", { row_count: result.row_count, columns: result.columns.length });
     } catch (err) {
       setStage("idle");
       if (err instanceof ApiError) {

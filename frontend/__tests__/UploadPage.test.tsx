@@ -38,7 +38,7 @@ describe("UploadPage", () => {
     mockUpload.mockResolvedValueOnce({
       dataset_id: "ds-1",
       row_count: 500,
-      schema: [
+      columns: [
         { name: "age", detected_type: "numeric" },
         { name: "city", detected_type: "categorical" },
       ],
@@ -93,7 +93,7 @@ describe("UploadPage", () => {
     mockUpload.mockResolvedValueOnce({
       dataset_id: "ds-1",
       row_count: 100,
-      schema: [{ name: "x", detected_type: "numeric" }],
+      columns: [{ name: "x", detected_type: "numeric" }],
     });
     mockGenerate.mockResolvedValueOnce({ job_id: "job-abc" });
 

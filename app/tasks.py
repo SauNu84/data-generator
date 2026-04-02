@@ -81,6 +81,14 @@ def _build_quality_score(real_df: pd.DataFrame, synthetic_df: pd.DataFrame, meta
     return {"overall": round(overall, 2), "columns": column_scores}
 
 
+_DETECTED_TO_SDTYPE: dict[str, str] = {
+    "numeric": "numerical",
+    "categorical": "categorical",
+    "datetime": "datetime",
+    "boolean": "boolean",
+}
+
+
 @celery_app.task(bind=True, name="app.tasks.generate_synthetic_data", max_retries=2, default_retry_delay=30)
 def generate_synthetic_data(
     self: Task,
@@ -88,6 +96,7 @@ def generate_synthetic_data(
     dataset_id: str,
     model_type: str,
     requested_rows: int,
+    schema_overrides: dict | None = None,
 ) -> dict:
     """Fit SDV model and generate synthetic CSV for the given job."""
     job_uuid = uuid.UUID(job_id)
@@ -114,6 +123,15 @@ def generate_synthetic_data(
 
             # Build SDV metadata
             metadata = Metadata.detect_from_dataframe(real_df)
+
+            # Apply frontend schema_overrides (e.g. user-corrected column types)
+            if schema_overrides:
+                for col_name, detected_type in schema_overrides.items():
+                    sdtype = _DETECTED_TO_SDTYPE.get(detected_type, detected_type)
+                    try:
+                        metadata.update_column(col_name, sdtype=sdtype)
+                    except Exception as exc:
+                        log.warning("schema_override skipped for %s: %s", col_name, exc)
 
             # Fit model
             log.info("Job %s: fitting %s on %d rows", job_id, model_type, len(real_df))

@@ -8,7 +8,7 @@ export interface ColumnSchema {
 export interface UploadResponse {
   dataset_id: string;
   row_count: number;
-  schema: ColumnSchema[];
+  columns: ColumnSchema[];
 }
 
 export interface GenerateRequest {

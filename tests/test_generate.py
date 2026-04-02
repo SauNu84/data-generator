@@ -41,6 +41,70 @@ async def test_generate_happy_path(client, db_session, sample_csv_bytes):
 
 
 @pytest.mark.anyio
+async def test_generate_frontend_field_names(client, db_session):
+    """Contract regression: frontend sends row_count + model — must return 202, not 422."""
+    from app.models import Dataset
+
+    dataset = Dataset(
+        id=uuid.uuid4(),
+        original_filename="train.csv",
+        s3_key="inputs/abc.csv",
+        row_count=10,
+        schema_json=[],
+    )
+    db_session.add(dataset)
+    await db_session.commit()
+
+    with patch("app.main.generate_synthetic_data") as mock_task:
+        mock_task.delay = lambda *a, **kw: None
+
+        resp = await client.post(
+            "/api/generate",
+            json={
+                "dataset_id": str(dataset.id),
+                "row_count": 75,
+                "model": "CTGAN",
+            },
+        )
+
+    assert resp.status_code == 202, resp.text
+    body = resp.json()
+    assert body["model_type"] == "CTGAN"
+    assert "job_id" in body
+
+
+@pytest.mark.anyio
+async def test_generate_frontend_field_names_with_schema_overrides(client, db_session):
+    """schema_overrides from frontend must be accepted without 422."""
+    from app.models import Dataset
+
+    dataset = Dataset(
+        id=uuid.uuid4(),
+        original_filename="train.csv",
+        s3_key="inputs/abc.csv",
+        row_count=10,
+        schema_json=[],
+    )
+    db_session.add(dataset)
+    await db_session.commit()
+
+    with patch("app.main.generate_synthetic_data") as mock_task:
+        mock_task.delay = lambda *a, **kw: None
+
+        resp = await client.post(
+            "/api/generate",
+            json={
+                "dataset_id": str(dataset.id),
+                "row_count": 50,
+                "model": "GaussianCopula",
+                "schema_overrides": {"age": "numeric", "city": "categorical"},
+            },
+        )
+
+    assert resp.status_code == 202, resp.text
+
+
+@pytest.mark.anyio
 async def test_generate_ctgan(client, db_session):
     from app.models import Dataset
 
