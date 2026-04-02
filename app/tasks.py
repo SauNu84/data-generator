@@ -37,13 +37,23 @@ from app.storage import delete_object, download_object_bytes, upload_dataframe_a
 
 log = logging.getLogger(__name__)
 
+
+def _make_sync_engine():
+    """Build a synchronous SQLAlchemy engine from settings.
+    Uses PostgreSQL-specific pool args in prod; falls back for SQLite in tests."""
+    url = settings.database_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+    if url.startswith("sqlite"):
+        from sqlalchemy.pool import StaticPool
+        return create_engine(
+            url,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+    return create_engine(url, pool_pre_ping=True, pool_size=5, max_overflow=10)
+
+
 # Synchronous SQLAlchemy engine for Celery workers (not async)
-_sync_engine = create_engine(
-    settings.database_url.replace("postgresql+asyncpg://", "postgresql+psycopg2://"),
-    pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=10,
-)
+_sync_engine = _make_sync_engine()
 
 
 def _get_session() -> Session:

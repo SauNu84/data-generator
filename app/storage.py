@@ -6,6 +6,8 @@ Configurable via S3_ENDPOINT_URL:
   - Absent in prod → boto3 uses AWS default endpoint
 """
 
+from __future__ import annotations
+
 import io
 import uuid
 
@@ -14,7 +16,7 @@ from botocore.exceptions import ClientError
 
 from app.config import settings
 
-_client: "boto3.client" | None = None
+_client: boto3.client | None = None
 
 
 def get_s3_client():
