@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 
 # ─── Upload ──────────────────────────────────────────────────────────────────
@@ -94,6 +94,89 @@ class DownloadResponse(BaseModel):
     job_id: uuid.UUID
     url: str
     expires_in_seconds: int
+
+
+# ─── Auth ─────────────────────────────────────────────────────────────────────
+
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class UserProfile(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    email: str
+    tier: str
+    is_email_verified: bool
+    created_at: datetime
+
+
+class AuthTokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    user: UserProfile
+
+
+# ─── API Keys ─────────────────────────────────────────────────────────────────
+
+class ApiKeyCreateRequest(BaseModel):
+    name: str = Field(default="Default", max_length=100)
+
+
+class ApiKeyResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    key_prefix: str
+    request_count: int
+    last_used_at: datetime | None
+    revoked: bool
+    created_at: datetime
+
+
+class ApiKeyCreatedResponse(ApiKeyResponse):
+    """Only returned on creation — includes the full key."""
+    key: str
+
+
+# ─── Dashboard ────────────────────────────────────────────────────────────────
+
+class DatasetSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    original_filename: str
+    row_count: int
+    created_at: datetime
+    job_count: int = 0
+
+
+class DashboardResponse(BaseModel):
+    datasets: list[DatasetSummary]
+    total: int
+    page: int
+    page_size: int
+
+
+# ─── Billing ──────────────────────────────────────────────────────────────────
+
+class CheckoutSessionResponse(BaseModel):
+    checkout_url: str
+
+
+class UsageSummaryResponse(BaseModel):
+    tier: str
+    monthly_generations_used: int
+    monthly_generations_limit: int | None  # None = unlimited
 
 
 # ─── Error ────────────────────────────────────────────────────────────────────

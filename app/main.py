@@ -21,7 +21,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import AsyncSessionLocal, engine, get_db
-from app.models import Base, Dataset, GenerationJob
+from app.deps import get_current_user_or_api_key
+from app.models import Base, Dataset, GenerationJob, User
+from app.routes import auth as auth_router
+from app.routes import billing as billing_router
+from app.routes import dashboard as dashboard_router
+from app.routes import keys as keys_router
 from app.schemas import (
     ColumnQuality,
     ColumnSchema,
@@ -57,6 +62,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ─── Routers ──────────────────────────────────────────────────────────────────
+
+app.include_router(auth_router.router)
+app.include_router(keys_router.router)
+app.include_router(billing_router.router)
+app.include_router(dashboard_router.router)
 
 
 # ─── Health ───────────────────────────────────────────────────────────────────
@@ -101,6 +113,7 @@ def _infer_schema(df: pd.DataFrame) -> list[ColumnSchema]:
 async def upload_csv(
     file: UploadFile = File(..., description="CSV file to use as training data"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_or_api_key),
 ):
     # Size guard (reads into memory — fine for ≤50MB)
     raw = await file.read()
@@ -136,6 +149,7 @@ async def upload_csv(
         s3_key=s3_key,
         row_count=len(df),
         schema_json=[c.model_dump() for c in schema],
+        user_id=current_user.id,
     )
     db.add(dataset)
     await db.commit()
@@ -155,11 +169,39 @@ async def upload_csv(
 async def start_generation(
     req: GenerateRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_or_api_key),
 ):
-    # Verify dataset exists
+    from datetime import datetime, timezone
+    from calendar import monthrange
+    from sqlalchemy import func
+    from app.models import UsageEvent
+
+    # Free tier: check monthly generation limit
+    if current_user.tier == "free":
+        now = datetime.now(timezone.utc)
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        used = await db.scalar(
+            select(func.count(UsageEvent.id)).where(
+                UsageEvent.user_id == current_user.id,
+                UsageEvent.event_type == "generation",
+                UsageEvent.created_at >= month_start,
+            )
+        )
+        if (used or 0) >= settings.free_tier_monthly_generations:
+            raise HTTPException(
+                status_code=402,
+                detail=(
+                    f"Free tier limit reached ({settings.free_tier_monthly_generations} "
+                    "generations/month). Upgrade to Pro for unlimited access."
+                ),
+            )
+
+    # Verify dataset exists and belongs to this user
     dataset = await db.get(Dataset, req.dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail="Dataset not found.")
+    if dataset.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied.")
 
     # Create job record
     job = GenerationJob(
@@ -169,6 +211,10 @@ async def start_generation(
         requested_rows=req.num_rows,
     )
     db.add(job)
+
+    # Record usage event
+    db.add(UsageEvent(user_id=current_user.id, event_type="generation"))
+
     await db.commit()
     await db.refresh(job)
 
@@ -195,10 +241,16 @@ async def start_generation(
 async def get_job_status(
     job_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_or_api_key),
 ):
     job = await db.get(GenerationJob, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found.")
+
+    # Verify ownership via dataset
+    dataset = await db.get(Dataset, job.dataset_id)
+    if not dataset or dataset.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied.")
 
     quality_score: float | None = None
     column_quality: list[ColumnQuality] | None = None
@@ -237,10 +289,15 @@ async def get_job_status(
 async def get_download_url(
     job_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_or_api_key),
 ):
     job = await db.get(GenerationJob, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found.")
+
+    dataset = await db.get(Dataset, job.dataset_id)
+    if not dataset or dataset.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied.")
 
     if job.status != "done":
         raise HTTPException(status_code=409, detail=f"Job is not done (status: {job.status}).")
