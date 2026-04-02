@@ -26,7 +26,12 @@ from app.models import Base, Dataset, GenerationJob, User
 from app.routes import auth as auth_router
 from app.routes import billing as billing_router
 from app.routes import dashboard as dashboard_router
+from app.routes import database as database_router
+from app.routes import dbt as dbt_router
 from app.routes import keys as keys_router
+from app.routes import multi_table as multi_table_router
+from app.routes import samples as samples_router
+from app.pii import scan_dataframe
 from app.schemas import (
     ColumnQuality,
     ColumnSchema,
@@ -34,6 +39,7 @@ from app.schemas import (
     GenerateRequest,
     GenerateResponse,
     JobStatusResponse,
+    PiiColumnInfo,
     UploadResponse,
 )
 from app.storage import ensure_bucket, generate_presigned_url, upload_csv_bytes
@@ -69,6 +75,10 @@ app.include_router(auth_router.router)
 app.include_router(keys_router.router)
 app.include_router(billing_router.router)
 app.include_router(dashboard_router.router)
+app.include_router(dbt_router.router)
+app.include_router(samples_router.router)
+app.include_router(multi_table_router.router)
+app.include_router(database_router.router)
 
 
 # ─── Health ───────────────────────────────────────────────────────────────────
@@ -143,12 +153,23 @@ async def upload_csv(
     # Infer schema
     schema = _infer_schema(df)
 
-    # Persist Dataset record
+    # Scan for PII
+    pii_result = scan_dataframe(df)
+    pii_info = [
+        PiiColumnInfo(column=c.column, pii_type=c.pii_type, detection_method=c.detection_method)
+        for c in pii_result.pii_columns
+    ]
+
+    # Persist Dataset record — schema_json stores columns + pii metadata
     dataset = Dataset(
         original_filename=file.filename or "upload.csv",
         s3_key=s3_key,
         row_count=len(df),
-        schema_json=[c.model_dump() for c in schema],
+        schema_json={
+            "columns": [c.model_dump() for c in schema],
+            "pii_columns": [p.model_dump() for p in pii_info],
+            "mode": "single_table",
+        },
         user_id=current_user.id,
     )
     db.add(dataset)
@@ -160,6 +181,7 @@ async def upload_csv(
         original_filename=dataset.original_filename,
         row_count=dataset.row_count,
         columns=schema,
+        pii_columns=pii_info,
     )
 
 

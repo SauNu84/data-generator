@@ -22,9 +22,31 @@ pandas==2.2.3
 # ── Storage ───────────────────────────────────────────────────────────────────
 boto3==1.37.23
 
+# ── Auth ──────────────────────────────────────────────────────────────────────
+python-jose[cryptography]==3.3.0  # JWT encode/decode
+passlib[bcrypt]==1.7.4            # password hashing
+httpx==0.28.1                     # async HTTP (Google OAuth token exchange)
+itsdangerous==2.2.0               # email confirmation tokens
+
+# ── Billing ───────────────────────────────────────────────────────────────────
+stripe==11.4.1
+
+# ── Rate limiting ─────────────────────────────────────────────────────────────
+slowapi==0.1.9
+limits==3.14.0
+
+# ── PII Detection ─────────────────────────────────────────────────────────────
+faker==25.2.0                    # synthetic value generation for PII masking
+
+# ── dbt Integration ───────────────────────────────────────────────────────────
+PyYAML==6.0.2                    # parse dbt schema.yml
+
+# ── Database Connector ────────────────────────────────────────────────────────
+pymysql==1.1.1                   # MySQL driver (optional: install for MySQL support)
+cryptography==42.0.8             # pymysql ssl requirement
+
 # ── Testing ───────────────────────────────────────────────────────────────────
 pytest==8.3.5
 pytest-asyncio==0.26.0
 anyio==4.9.0
-httpx==0.28.1
 aiosqlite==0.21.0        # SQLite async driver for tests

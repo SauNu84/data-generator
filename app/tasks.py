@@ -121,6 +121,16 @@ def generate_synthetic_data(
             raw = download_object_bytes(dataset.s3_key)
             real_df = pd.read_csv(io.BytesIO(raw))
 
+            # Drop PII columns before fitting (prevents memorisation)
+            schema_meta = dataset.schema_json
+            if isinstance(schema_meta, dict):
+                from app.pii import PiiColumn, drop_pii_columns
+                raw_pii = schema_meta.get("pii_columns", [])
+                if raw_pii:
+                    pii_cols = [PiiColumn(**p) for p in raw_pii if p.get("column")]
+                    real_df = drop_pii_columns(real_df, pii_cols)
+                    log.info("Job %s: dropped %d PII column(s) before fitting", job_id, len(pii_cols))
+
             # Build SDV metadata
             metadata = Metadata.detect_from_dataframe(real_df)
 
@@ -175,6 +185,150 @@ def generate_synthetic_data(
 
         except Exception as exc:
             log.exception("Job %s: generation failed: %s", job_id, exc)
+            job.status = "failed"
+            job.error_detail = str(exc)[:2000]
+            job.completed_at = datetime.now(timezone.utc)
+            session.commit()
+            try:
+                raise self.retry(exc=exc)
+            except self.MaxRetriesExceededError:
+                return {"status": "failed", "error": str(exc)}
+
+
+@celery_app.task(bind=True, name="app.tasks.generate_multi_table_data", max_retries=2, default_retry_delay=30)
+def generate_multi_table_data(
+    self: Task,
+    job_id: str,
+    dataset_id: str,
+    scale_factor: float = 1.0,
+) -> dict:
+    """Fit SDV HMA model on a multi-table ZIP and generate scaled synthetic output."""
+    import io as _io
+    import zipfile
+
+    job_uuid = uuid.UUID(job_id)
+
+    with _get_session() as session:
+        job = session.get(GenerationJob, job_uuid)
+        if job is None:
+            log.error("Multi-table job %s not found", job_id)
+            return {"status": "failed", "error": "Job not found"}
+
+        job.status = "running"
+        session.commit()
+
+        try:
+            dataset = session.get(Dataset, uuid.UUID(dataset_id))
+            if dataset is None:
+                raise ValueError(f"Dataset {dataset_id} not found")
+
+            schema_meta = dataset.schema_json or {}
+            if schema_meta.get("mode") != "multi_table":
+                raise ValueError("Dataset is not a multi-table dataset")
+
+            table_names: list[str] = schema_meta.get("tables", [])
+            relationships: list[dict] = schema_meta.get("relationships", [])
+
+            log.info("Multi-table job %s: loading ZIP s3_key=%s", job_id, dataset.s3_key)
+            raw_zip = download_object_bytes(dataset.s3_key)
+
+            # Extract CSVs from ZIP
+            zf = zipfile.ZipFile(_io.BytesIO(raw_zip))
+            csv_map: dict[str, pd.DataFrame] = {}
+            for name in zf.namelist():
+                if name.lower().endswith(".csv") and not name.startswith("__MACOSX"):
+                    table_name = name.rsplit("/", 1)[-1].removesuffix(".csv")
+                    csv_map[table_name] = pd.read_csv(_io.BytesIO(zf.read(name)))
+
+            if not csv_map:
+                raise ValueError("ZIP contains no CSV files")
+
+            # Build SDV multi-table metadata
+            from sdv.metadata import MultiTableMetadata
+
+            metadata = MultiTableMetadata()
+            for tbl_name, df in csv_map.items():
+                metadata.detect_table_from_dataframe(table_name=tbl_name, data=df)
+
+            for rel in relationships:
+                try:
+                    metadata.add_relationship(
+                        parent_table_name=rel["parent_table"],
+                        parent_primary_key=rel["parent_primary_key"],
+                        child_table_name=rel["child_table"],
+                        child_foreign_key=rel["child_foreign_key"],
+                    )
+                except Exception as rel_exc:
+                    log.warning("Multi-table job %s: skipping relationship %s → %s: %s",
+                                job_id, rel.get("parent_table"), rel.get("child_table"), rel_exc)
+
+            # Fit HMA
+            from sdv.multi_table import HMASynthesizer
+
+            log.info("Multi-table job %s: fitting HMA on %d tables", job_id, len(csv_map))
+            synthesizer = HMASynthesizer(metadata)
+            synthesizer.fit(csv_map)
+
+            # Sample with scale_factor
+            log.info("Multi-table job %s: sampling (scale_factor=%.2f)", job_id, scale_factor)
+            synthetic_tables: dict[str, pd.DataFrame] = synthesizer.sample(scale=scale_factor)
+
+            # Compute per-table quality scores
+            quality_per_table: dict[str, float] = {}
+            for tbl_name, syn_df in synthetic_tables.items():
+                real_df = csv_map.get(tbl_name)
+                if real_df is not None:
+                    try:
+                        from sdv.evaluation.single_table import evaluate_quality
+                        from sdv.metadata import Metadata as SingleMeta
+
+                        single_meta = SingleMeta.detect_from_dataframe(real_df)
+                        report = evaluate_quality(real_df, syn_df, single_meta, verbose=False)
+                        quality_per_table[tbl_name] = round(float(report.get_score() * 100), 2)
+                    except Exception as q_exc:
+                        log.warning("Quality score failed for table %s: %s", tbl_name, q_exc)
+                        quality_per_table[tbl_name] = 0.0
+
+            overall_quality = (
+                round(sum(quality_per_table.values()) / len(quality_per_table), 2)
+                if quality_per_table else 0.0
+            )
+
+            # Package synthetic tables as a ZIP
+            out_buf = _io.BytesIO()
+            with zipfile.ZipFile(out_buf, "w", compression=zipfile.ZIP_DEFLATED) as out_zip:
+                for tbl_name, syn_df in synthetic_tables.items():
+                    csv_bytes = syn_df.to_csv(index=False).encode()
+                    out_zip.writestr(f"{tbl_name}.csv", csv_bytes)
+            output_key = upload_csv_bytes(out_buf.getvalue(), prefix="outputs-multi")
+            log.info("Multi-table job %s: uploaded output ZIP to %s", job_id, output_key)
+
+            quality_json = {
+                "overall": overall_quality,
+                "tables": quality_per_table,
+                "columns": [],
+            }
+
+            expires_at = datetime.now(timezone.utc) + timedelta(seconds=settings.job_output_ttl_seconds)
+            job.status = "done"
+            job.output_s3_key = output_key
+            job.quality_score_json = quality_json
+            job.expires_at = expires_at
+            job.completed_at = datetime.now(timezone.utc)
+            session.commit()
+
+            return {"status": "done", "output_key": output_key, "quality": quality_json}
+
+        except SoftTimeLimitExceeded:
+            log.error("Multi-table job %s: soft time limit exceeded", job_id)
+            job.status = "failed"
+            job.error_detail = "Multi-table generation timed out"
+            job.completed_at = datetime.now(timezone.utc)
+            session.commit()
+            raise
+
+        except Exception as exc:
+            log.exception("Multi-table job %s: failed: %s", job_id, exc)
             job.status = "failed"
             job.error_detail = str(exc)[:2000]
             job.completed_at = datetime.now(timezone.utc)
