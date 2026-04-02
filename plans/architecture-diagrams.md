@@ -209,6 +209,188 @@ sequenceDiagram
 
 ---
 
+## Phase 2 Component Diagram — With Auth, Billing, Rate Limiter, dbt Parser
+
+```mermaid
+graph TB
+    subgraph Client["Client Layer"]
+        UI["Web UI\nNext.js 14 + TypeScript\nAuth · Dashboard · Billing · Multi-table wizard"]
+        CLI["CLI / API Consumers\ncurl · Python SDK · CI pipelines"]
+    end
+
+    subgraph Auth["Auth Middleware Layer"]
+        JWT["JWT Verifier\nHS256 access token\n15-min TTL"]
+        APIKEY["API Key Verifier\nSHA-256 lookup\nX-API-Key header"]
+        RATE["Rate Limiter\nRedis sliding window\nfree: 60 req/min · pro: 600 req/min"]
+        TIER["Tier Enforcer\nFastAPI dependency\nrequire_pro / require_enterprise"]
+    end
+
+    subgraph API["API Layer — FastAPI (uvicorn)"]
+        AUTH_R["/api/auth/*\nRegister · Login · Refresh\nLogout · Google OAuth · /me"]
+        KEYS_R["/api/keys\nCreate · List · Revoke\n(Pro tier only)"]
+        BILLING_R["/api/billing/*\nCheckout · Usage\n/api/webhooks/stripe"]
+        CORE_R["/api/upload · /api/generate\n/api/jobs/{id} · /api/jobs/{id}/download\n/api/dashboard"]
+        DBT_R["/api/dbt/parse\n/api/dbt/generate\nschema.yml → SDV metadata"]
+        MULTI_R["/api/datasets/multi\n/api/datasets/{id}/jobs/multi\nHMA multi-table synthesis"]
+    end
+
+    subgraph Queue["Queue Layer"]
+        REDIS["Redis 7\nBroker (DB 0) · Results (DB 1)\nRate limit counters (DB 2)"]
+    end
+
+    subgraph Workers["Worker Layer"]
+        W_SINGLE["Celery Worker\nSingle-table synthesis\nGaussianCopula · CTGAN · PAR"]
+        W_MULTI["Celery Worker\nMulti-table synthesis\nSDV HMA model"]
+        W_JOBS["Celery Beat\nPeriodic: cleanup expired jobs\nRefresh token pruning"]
+    end
+
+    subgraph External["External Services"]
+        GOOGLE["Google OAuth 2.0\naccounts.google.com"]
+        STRIPE["Stripe\nCheckout · Webhooks\nSubscription management"]
+    end
+
+    subgraph Storage["Storage Layer"]
+        MINIO["MinIO (dev) / S3 (prod)\nInputs: inputs/{uuid}.csv\nOutputs: outputs/{job_id}.csv.zip"]
+        POSTGRES["PostgreSQL 15\nusers · refresh_tokens · api_keys\nusage_events · subscriptions\ndatasets · generation_jobs"]
+    end
+
+    UI -->|REST + WebSocket| JWT
+    CLI -->|X-API-Key header| APIKEY
+    JWT --> RATE
+    APIKEY --> RATE
+    RATE --> TIER
+    TIER --> AUTH_R
+    TIER --> KEYS_R
+    TIER --> BILLING_R
+    TIER --> CORE_R
+    TIER --> DBT_R
+    TIER --> MULTI_R
+
+    AUTH_R -->|bcrypt verify / JWT issue| POSTGRES
+    AUTH_R -->|OAuth code exchange| GOOGLE
+    KEYS_R -->|SHA-256 store| POSTGRES
+    BILLING_R -->|Checkout Session| STRIPE
+    STRIPE -->|Webhooks| BILLING_R
+    BILLING_R -->|Subscription state update| POSTGRES
+    RATE -->|ZADD/ZCARD sliding window| REDIS
+
+    CORE_R -->|SQLAlchemy async| POSTGRES
+    CORE_R -->|Enqueue generate task| REDIS
+    CORE_R -->|boto3 presigned URL| MINIO
+    DBT_R -->|Parse schema.yml → SDV metadata| POSTGRES
+    DBT_R -->|Enqueue generate task| REDIS
+    MULTI_R -->|FK graph validation| POSTGRES
+    MULTI_R -->|Enqueue HMA task| REDIS
+
+    REDIS -->|Dispatch| W_SINGLE
+    REDIS -->|Dispatch| W_MULTI
+    W_SINGLE -->|SDV fit + sample| MINIO
+    W_SINGLE -->|Update job status| POSTGRES
+    W_MULTI -->|HMA fit + sample| MINIO
+    W_MULTI -->|ZIP multi-table output| MINIO
+    W_MULTI -->|Update job status| POSTGRES
+    W_JOBS -->|Prune expired tokens/jobs| POSTGRES
+    W_JOBS -->|Expire S3 objects| MINIO
+```
+
+---
+
+## Phase 2 Auth Flow Sequence
+
+```mermaid
+sequenceDiagram
+    participant C as Client (SPA / API)
+    participant API as FastAPI
+    participant G as Google OAuth
+    participant DB as PostgreSQL
+    participant R as Redis
+
+    Note over C,R: Email/Password Login
+    C->>API: POST /api/auth/login { email, password }
+    API->>DB: SELECT users WHERE email=... (bcrypt verify)
+    DB-->>API: User record
+    API->>DB: INSERT refresh_tokens (SHA-256 hash, 7d TTL)
+    API-->>C: 200 { access_token (JWT 15m), refresh_token (opaque) }
+
+    Note over C,R: Token Refresh (rotation)
+    C->>API: POST /api/auth/refresh { refresh_token }
+    API->>DB: SELECT refresh_tokens WHERE hash=... AND revoked=false
+    DB-->>API: RefreshToken record
+    API->>DB: SET revoked=true (old) + INSERT new RefreshToken
+    API-->>C: 200 { new access_token, new refresh_token }
+
+    Note over C,R: Authenticated API Request
+    C->>API: POST /api/generate\nAuthorization: Bearer <access_token>
+    API->>API: JWT.decode(token) → user_id (no DB hit)
+    API->>R: ZADD ratelimit:{user_id} score=now() / ZCARD → count
+    alt count > tier limit
+        API-->>C: 429 Too Many Requests\nRetry-After: 60
+    else within limit
+        API->>DB: Validate dataset ownership
+        API->>R: Enqueue Celery task
+        API-->>C: 202 Accepted { job_id }
+    end
+
+    Note over C,R: Google OAuth Flow
+    C->>API: GET /api/auth/google
+    API-->>C: 302 Redirect → accounts.google.com
+    C->>G: User authenticates
+    G-->>API: GET /api/auth/google/callback?code=...
+    API->>G: POST token exchange → userinfo { sub, email }
+    API->>DB: UPSERT User (find by google_sub or email)
+    API->>DB: INSERT refresh_tokens
+    API-->>C: 302 Redirect /auth/callback#access_token=...&refresh_token=...
+```
+
+---
+
+## Phase 2 Stripe Subscription State Machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> free : User registers
+    free --> checkout : POST /api/billing/checkout
+    checkout --> trialing : checkout.session.completed\n(trial period configured)
+    checkout --> active : checkout.session.completed\n(no trial)
+    trialing --> active : trial ends, first payment succeeds
+    trialing --> canceled : user cancels during trial
+    active --> past_due : payment fails
+    past_due --> active : payment retry succeeds
+    past_due --> canceled : max retries exceeded
+    active --> canceled : user cancels
+    canceled --> free : subscription.deleted webhook\n→ users.tier = free
+    active --> free : subscription.deleted webhook\n→ users.tier = free (no other active sub)
+```
+
+---
+
+## Phase 2 Docker Compose Topology
+
+```mermaid
+graph LR
+    subgraph docker-compose["Docker Compose (Phase 2 — localhost)"]
+        API_SVC["api\nFastAPI:8000\nimage: datagen-api"]
+        WORKER_SVC["worker\nCelery (single + multi-table)\nimage: datagen-api"]
+        BEAT_SVC["beat\nCelery Beat (cleanup)\nimage: datagen-api"]
+        DB_SVC["postgres\nPostgreSQL 15:5432\nimage: postgres:15-alpine"]
+        REDIS_SVC["redis\nRedis 7:6379\nBroker + Rate limiter\nimage: redis:7-alpine"]
+        MINIO_SVC["minio\nMinIO:9000 (API)\n:9001 (Console)\nimage: minio/minio"]
+        FLOWER_SVC["flower\nFlower:5555\nimage: mflower"]
+    end
+
+    API_SVC --> DB_SVC
+    API_SVC --> REDIS_SVC
+    API_SVC --> MINIO_SVC
+    WORKER_SVC --> DB_SVC
+    WORKER_SVC --> REDIS_SVC
+    WORKER_SVC --> MINIO_SVC
+    BEAT_SVC --> REDIS_SVC
+    BEAT_SVC --> DB_SVC
+    FLOWER_SVC --> REDIS_SVC
+```
+
+---
+
 ## Phase 1 Docker Compose Topology
 
 ```mermaid
