@@ -878,3 +878,46 @@ class TestGenerateMultiTableData:
 
         assert result["status"] == "done"
         assert result["quality"]["tables"]["users"] == 0.0
+
+
+# ─── _make_sync_engine + _get_session ────────────────────────────────────────
+
+
+class TestMakeSyncEngine:
+    """Cover the PostgreSQL branch of _make_sync_engine (line 52) and _get_session (line 60)."""
+
+    def test_postgres_branch_uses_pool_args(self):
+        """Non-SQLite URL hits the PostgreSQL create_engine call (pool_pre_ping, pool_size)."""
+        from unittest.mock import call as _call
+
+        from app.tasks import _make_sync_engine
+
+        pg_url = "postgresql+psycopg2://user:pass@localhost/testdb"
+        with patch("app.tasks.create_engine") as mock_ce:
+            _make_sync_engine.__globals__["settings"]  # ensure module loaded
+            # Temporarily override settings.database_url
+            import app.tasks as _tasks_mod
+            original_url = _tasks_mod.settings.database_url
+            _tasks_mod.settings.database_url = "postgresql+asyncpg://user:pass@localhost/testdb"
+            try:
+                _make_sync_engine()
+            finally:
+                _tasks_mod.settings.database_url = original_url
+
+        mock_ce.assert_called_once_with(
+            pg_url, pool_pre_ping=True, pool_size=5, max_overflow=10
+        )
+
+    def test_get_session_returns_session_instance(self):
+        """_get_session() returns a Session wrapping the module-level sync engine."""
+        from sqlalchemy.orm import Session as SASession
+
+        import app.tasks as _tasks_mod
+        from app.tasks import _get_session
+
+        with patch("app.tasks.Session") as MockSession:
+            MockSession.return_value = MagicMock(spec=SASession)
+            result = _get_session()
+
+        MockSession.assert_called_once_with(_tasks_mod._sync_engine)
+        assert result is MockSession.return_value
