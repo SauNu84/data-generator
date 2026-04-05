@@ -226,8 +226,10 @@ jobs:
         working-directory: frontend
         run: npm run start -- -p 3000 &
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+      - name: Install Playwright and browsers
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
 
       - name: Wait for services to be ready
         run: |
@@ -238,7 +240,7 @@ jobs:
           echo "All services ready."
 
       - name: Run Playwright E2E tests
-        run: npx playwright test tests/e2e/auth/ --reporter=junit,html
+        run: npx playwright test tests/e2e/auth/ --project=chromium
         env:
           BASE_URL: http://localhost:3000
           API_URL: http://localhost:8000

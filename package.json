@@ -1,0 +1,7 @@
+{
+  "name": "data-generator",
+  "private": true,
+  "devDependencies": {
+    "@playwright/test": "1.43.0"
+  }
+}

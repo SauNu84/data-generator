@@ -6,3 +6,6 @@ venv/
 .env
 *.csv
 !sample_input.csv
+node_modules/
+playwright-report/
+playwright-results.xml
