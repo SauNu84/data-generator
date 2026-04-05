@@ -116,8 +116,10 @@ async def dbt_generate(
     }
 
     # Persist Dataset with a synthetic s3_key placeholder
+    dataset_id = uuid.uuid4()
     s3_key = f"dbt/{uuid.uuid4()}/{req.model_name}.schema"
     dataset = Dataset(
+        id=dataset_id,
         original_filename=f"{req.model_name}.schema.yml",
         s3_key=s3_key,
         row_count=0,  # no real data
@@ -128,7 +130,7 @@ async def dbt_generate(
 
     # Create generation job
     job = GenerationJob(
-        dataset_id=dataset.id,
+        dataset_id=dataset_id,
         status="queued",
         model_type=req.sdv_model,
         requested_rows=req.row_count,
