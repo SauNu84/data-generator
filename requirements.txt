@@ -4,6 +4,7 @@ uvicorn[standard]==0.34.0
 python-multipart==0.0.20
 pydantic==2.11.1
 pydantic-settings==2.8.1
+email-validator==2.2.0           # required for pydantic EmailStr fields
 
 # ── Database ──────────────────────────────────────────────────────────────────
 sqlalchemy==2.0.40
