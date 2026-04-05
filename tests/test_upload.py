@@ -9,9 +9,9 @@ import pytest_asyncio
 
 
 @pytest.mark.anyio
-async def test_upload_happy_path(client, sample_csv_bytes):
+async def test_upload_happy_path(auth_client, sample_csv_bytes):
     with patch("app.main.upload_csv_bytes", return_value="inputs/test-key.csv"):
-        resp = await client.post(
+        resp = await auth_client.post(
             "/api/upload",
             files={"file": ("data.csv", sample_csv_bytes, "text/csv")},
         )
@@ -27,10 +27,10 @@ async def test_upload_happy_path(client, sample_csv_bytes):
 
 
 @pytest.mark.anyio
-async def test_upload_empty_csv(client):
+async def test_upload_empty_csv(auth_client):
     empty = b"col1,col2\n"
     with patch("app.main.upload_csv_bytes", return_value="inputs/key.csv"):
-        resp = await client.post(
+        resp = await auth_client.post(
             "/api/upload",
             files={"file": ("empty.csv", empty, "text/csv")},
         )
@@ -39,8 +39,8 @@ async def test_upload_empty_csv(client):
 
 
 @pytest.mark.anyio
-async def test_upload_non_csv(client):
-    resp = await client.post(
+async def test_upload_non_csv(auth_client):
+    resp = await auth_client.post(
         "/api/upload",
         files={"file": ("data.json", b'{"key":"value"}', "application/json")},
     )
@@ -49,7 +49,7 @@ async def test_upload_non_csv(client):
 
 
 @pytest.mark.anyio
-async def test_upload_too_many_rows(client):
+async def test_upload_too_many_rows(auth_client):
     """CSV exceeding 100k row hard cap should return 422."""
     # Build a CSV larger than limit conceptually via mock
     import app.main as main_module
@@ -62,7 +62,7 @@ async def test_upload_too_many_rows(client):
     big_df.to_csv(buf, index=False)
 
     with patch("app.main.upload_csv_bytes", return_value="inputs/key.csv"):
-        resp = await client.post(
+        resp = await auth_client.post(
             "/api/upload",
             files={"file": ("big.csv", buf.getvalue(), "text/csv")},
         )

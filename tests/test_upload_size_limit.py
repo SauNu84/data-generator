@@ -6,7 +6,7 @@ import pytest
 
 
 @pytest.mark.anyio
-async def test_upload_exceeds_50mb(client):
+async def test_upload_exceeds_50mb(auth_client):
     """Files larger than 50 MB must return HTTP 413."""
     # Build a byte string just over the 50 MB limit via mock
     import app.main as main_module
@@ -19,7 +19,7 @@ async def test_upload_exceeds_50mb(client):
     oversized = b"age,income\n" + b"25,50000\n" * 20  # ~180 bytes
 
     try:
-        resp = await client.post(
+        resp = await auth_client.post(
             "/api/upload",
             files={"file": ("big.csv", oversized, "text/csv")},
         )
@@ -31,7 +31,7 @@ async def test_upload_exceeds_50mb(client):
 
 
 @pytest.mark.anyio
-async def test_upload_exactly_at_row_limit_passes(client):
+async def test_upload_exactly_at_row_limit_passes(auth_client):
     """A CSV at exactly max_upload_rows should be accepted."""
     import app.main as main_module
     from unittest.mock import patch
@@ -47,7 +47,7 @@ async def test_upload_exactly_at_row_limit_passes(client):
     try:
         with patch("app.main.upload_csv_bytes", return_value="inputs/test.csv"), \
              patch("app.main._infer_schema", return_value=[]):
-            resp = await client.post(
+            resp = await auth_client.post(
                 "/api/upload",
                 files={"file": ("at_limit.csv", buf.getvalue(), "text/csv")},
             )
@@ -59,7 +59,7 @@ async def test_upload_exactly_at_row_limit_passes(client):
 
 
 @pytest.mark.anyio
-async def test_upload_one_over_row_limit_fails(client):
+async def test_upload_one_over_row_limit_fails(auth_client):
     """A CSV one row over max_upload_rows should return 422."""
     import app.main as main_module
     from unittest.mock import patch
@@ -74,7 +74,7 @@ async def test_upload_one_over_row_limit_fails(client):
 
     try:
         with patch("app.main.upload_csv_bytes", return_value="inputs/test.csv"):
-            resp = await client.post(
+            resp = await auth_client.post(
                 "/api/upload",
                 files={"file": ("over_limit.csv", buf.getvalue(), "text/csv")},
             )
@@ -86,10 +86,10 @@ async def test_upload_one_over_row_limit_fails(client):
 
 
 @pytest.mark.anyio
-async def test_upload_malformed_binary_returns_400(client):
+async def test_upload_malformed_binary_returns_400(auth_client):
     """Non-parseable binary content must return HTTP 400."""
     garbage = b"\x00\x01\x02\xff\xfe garbage"
-    resp = await client.post(
+    resp = await auth_client.post(
         "/api/upload",
         files={"file": ("bad.csv", garbage, "text/csv")},
     )

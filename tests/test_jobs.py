@@ -8,11 +8,12 @@ import pytest
 
 
 @pytest.mark.anyio
-async def test_get_job_queued(client, db_session):
+async def test_get_job_queued(auth_client, db_session, test_user):
     from app.models import Dataset, GenerationJob
 
     dataset = Dataset(
         id=uuid.uuid4(),
+        user_id=test_user.id,
         original_filename="d.csv",
         s3_key="inputs/d.csv",
         row_count=5,
@@ -31,7 +32,7 @@ async def test_get_job_queued(client, db_session):
     db_session.add(job)
     await db_session.commit()
 
-    resp = await client.get(f"/api/jobs/{job.id}")
+    resp = await auth_client.get(f"/api/jobs/{job.id}")
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "queued"
@@ -39,11 +40,12 @@ async def test_get_job_queued(client, db_session):
 
 
 @pytest.mark.anyio
-async def test_get_job_done_with_quality(client, db_session):
+async def test_get_job_done_with_quality(auth_client, db_session, test_user):
     from app.models import Dataset, GenerationJob
 
     dataset = Dataset(
         id=uuid.uuid4(),
+        user_id=test_user.id,
         original_filename="d.csv",
         s3_key="inputs/d.csv",
         row_count=5,
@@ -71,7 +73,7 @@ async def test_get_job_done_with_quality(client, db_session):
 
     fake_url = "http://minio:9000/datagen-files/outputs/result.csv?sig=abc"
     with patch("app.main.generate_presigned_url", return_value=fake_url):
-        resp = await client.get(f"/api/jobs/{job.id}")
+        resp = await auth_client.get(f"/api/jobs/{job.id}")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -88,17 +90,18 @@ async def test_get_job_done_with_quality(client, db_session):
 
 
 @pytest.mark.anyio
-async def test_get_job_not_found(client):
-    resp = await client.get(f"/api/jobs/{uuid.uuid4()}")
+async def test_get_job_not_found(auth_client):
+    resp = await auth_client.get(f"/api/jobs/{uuid.uuid4()}")
     assert resp.status_code == 404
 
 
 @pytest.mark.anyio
-async def test_download_done_job(client, db_session):
+async def test_download_done_job(auth_client, db_session, test_user):
     from app.models import Dataset, GenerationJob
 
     dataset = Dataset(
         id=uuid.uuid4(),
+        user_id=test_user.id,
         original_filename="d.csv",
         s3_key="inputs/d.csv",
         row_count=5,
@@ -122,7 +125,7 @@ async def test_download_done_job(client, db_session):
 
     fake_url = "http://minio:9000/datagen-files/outputs/result.csv?presigned=token"
     with patch("app.main.generate_presigned_url", return_value=fake_url):
-        resp = await client.get(f"/api/jobs/{job.id}/download")
+        resp = await auth_client.get(f"/api/jobs/{job.id}/download")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -131,11 +134,12 @@ async def test_download_done_job(client, db_session):
 
 
 @pytest.mark.anyio
-async def test_download_not_done(client, db_session):
+async def test_download_not_done(auth_client, db_session, test_user):
     from app.models import Dataset, GenerationJob
 
     dataset = Dataset(
         id=uuid.uuid4(),
+        user_id=test_user.id,
         original_filename="d.csv",
         s3_key="inputs/d.csv",
         row_count=5,
@@ -154,17 +158,18 @@ async def test_download_not_done(client, db_session):
     db_session.add(job)
     await db_session.commit()
 
-    resp = await client.get(f"/api/jobs/{job.id}/download")
+    resp = await auth_client.get(f"/api/jobs/{job.id}/download")
     assert resp.status_code == 409
     assert "not done" in resp.json()["detail"].lower()
 
 
 @pytest.mark.anyio
-async def test_download_expired(client, db_session):
+async def test_download_expired(auth_client, db_session, test_user):
     from app.models import Dataset, GenerationJob
 
     dataset = Dataset(
         id=uuid.uuid4(),
+        user_id=test_user.id,
         original_filename="d.csv",
         s3_key="inputs/d.csv",
         row_count=5,
@@ -186,19 +191,20 @@ async def test_download_expired(client, db_session):
     db_session.add(job)
     await db_session.commit()
 
-    resp = await client.get(f"/api/jobs/{job.id}/download")
+    resp = await auth_client.get(f"/api/jobs/{job.id}/download")
     assert resp.status_code == 410
 
 
 # ─── Contract regression tests ────────────────────────────────────────────────
 
 @pytest.mark.anyio
-async def test_job_status_error_field_not_error_detail(client, db_session):
+async def test_job_status_error_field_not_error_detail(auth_client, db_session, test_user):
     """Contract: field must be `error`, not `error_detail`."""
     from app.models import Dataset, GenerationJob
 
     dataset = Dataset(
         id=uuid.uuid4(),
+        user_id=test_user.id,
         original_filename="d.csv",
         s3_key="inputs/d.csv",
         row_count=5,
@@ -219,7 +225,7 @@ async def test_job_status_error_field_not_error_detail(client, db_session):
     db_session.add(job)
     await db_session.commit()
 
-    resp = await client.get(f"/api/jobs/{job.id}")
+    resp = await auth_client.get(f"/api/jobs/{job.id}")
     assert resp.status_code == 200
     body = resp.json()
     assert body["error"] == "SDV fitting timed out"
@@ -227,12 +233,13 @@ async def test_job_status_error_field_not_error_detail(client, db_session):
 
 
 @pytest.mark.anyio
-async def test_job_status_quality_score_is_float(client, db_session):
+async def test_job_status_quality_score_is_float(auth_client, db_session, test_user):
     """Contract: quality_score must be a number (0-100), not an object."""
     from app.models import Dataset, GenerationJob
 
     dataset = Dataset(
         id=uuid.uuid4(),
+        user_id=test_user.id,
         original_filename="d.csv",
         s3_key="inputs/d.csv",
         row_count=5,
@@ -257,7 +264,7 @@ async def test_job_status_quality_score_is_float(client, db_session):
 
     fake_url = "http://minio:9000/out.csv?sig=x"
     with patch("app.main.generate_presigned_url", return_value=fake_url):
-        resp = await client.get(f"/api/jobs/{job.id}")
+        resp = await auth_client.get(f"/api/jobs/{job.id}")
 
     body = resp.json()
     assert isinstance(body["quality_score"], float)
@@ -265,12 +272,13 @@ async def test_job_status_quality_score_is_float(client, db_session):
 
 
 @pytest.mark.anyio
-async def test_job_status_download_url_present_for_done_job(client, db_session):
+async def test_job_status_download_url_present_for_done_job(auth_client, db_session, test_user):
     """Contract: download_url must be inline in job status for completed jobs."""
     from app.models import Dataset, GenerationJob
 
     dataset = Dataset(
         id=uuid.uuid4(),
+        user_id=test_user.id,
         original_filename="d.csv",
         s3_key="inputs/d.csv",
         row_count=5,
@@ -294,7 +302,7 @@ async def test_job_status_download_url_present_for_done_job(client, db_session):
 
     fake_url = "http://minio:9000/datagen-files/outputs/result.csv?presigned=token"
     with patch("app.main.generate_presigned_url", return_value=fake_url):
-        resp = await client.get(f"/api/jobs/{job.id}")
+        resp = await auth_client.get(f"/api/jobs/{job.id}")
 
     assert resp.status_code == 200
     body = resp.json()
@@ -302,12 +310,13 @@ async def test_job_status_download_url_present_for_done_job(client, db_session):
 
 
 @pytest.mark.anyio
-async def test_job_status_download_url_none_for_non_done_job(client, db_session):
+async def test_job_status_download_url_none_for_non_done_job(auth_client, db_session, test_user):
     """Contract: download_url must be None when job is not done."""
     from app.models import Dataset, GenerationJob
 
     dataset = Dataset(
         id=uuid.uuid4(),
+        user_id=test_user.id,
         original_filename="d.csv",
         s3_key="inputs/d.csv",
         row_count=5,
@@ -326,6 +335,6 @@ async def test_job_status_download_url_none_for_non_done_job(client, db_session)
     db_session.add(job)
     await db_session.commit()
 
-    resp = await client.get(f"/api/jobs/{job.id}")
+    resp = await auth_client.get(f"/api/jobs/{job.id}")
     assert resp.status_code == 200
     assert resp.json()["download_url"] is None
