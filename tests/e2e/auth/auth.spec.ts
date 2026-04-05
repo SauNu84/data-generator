@@ -19,6 +19,7 @@ const API_URL = process.env.API_URL ?? "http://localhost:8000";
 
 // ---------------------------------------------------------------------------
 // Helper: register + confirm email via API (bypasses email inbox in CI)
+// 409 = email already registered from a prior test in the same worker — treat as success.
 // ---------------------------------------------------------------------------
 async function registerAndConfirmViaApi(email: string, password: string) {
   const ctx = await request.newContext({ baseURL: API_URL });
@@ -26,13 +27,17 @@ async function registerAndConfirmViaApi(email: string, password: string) {
   const reg = await ctx.post("/api/auth/register", {
     data: { email, password },
   });
-  expect(reg.ok()).toBeTruthy();
-  const { email_token } = await reg.json();
 
-  if (email_token) {
-    const confirm = await ctx.get(`/api/auth/confirm-email?token=${email_token}`);
-    expect(confirm.ok()).toBeTruthy();
+  if (reg.status() !== 409) {
+    expect(reg.ok()).toBeTruthy();
+    const body = await reg.json();
+    const { email_token } = body;
+    if (email_token) {
+      const confirm = await ctx.get(`/api/auth/confirm-email?token=${email_token}`);
+      expect(confirm.ok()).toBeTruthy();
+    }
   }
+  // 409 means the user was already created by an earlier test in this worker — that's fine.
 
   await ctx.dispose();
 }
@@ -204,17 +209,18 @@ test.describe("Stripe Upgrade", () => {
 
   test("upgrade button redirects to Stripe checkout", async ({ page }) => {
     const dashboardPage = new DashboardPage(page);
-    await dashboardPage.goto();
+    // Use ?upgrade=1 so the upgrade banner (and button) is shown for a free-tier user
+    await page.goto("/dashboard?upgrade=1");
     await dashboardPage.expectLoaded();
 
-    // Capture the checkout URL (Stripe redirects externally)
-    const [popup] = await Promise.all([
+    // Capture the request to the billing checkout endpoint (Stripe redirects externally)
+    const [checkoutReq] = await Promise.all([
       page.waitForRequest((req) =>
         req.url().includes("checkout.stripe.com") || req.url().includes("/api/billing/checkout")
       ),
       dashboardPage.upgradeButton.click(),
     ]);
-    expect(popup).toBeTruthy();
+    expect(checkoutReq).toBeTruthy();
   });
 
   test("dashboard shows upgrade banner after upgrade=1 param", async ({ page }) => {
