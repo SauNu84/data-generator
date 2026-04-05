@@ -45,8 +45,8 @@ def test_scan_detects_email_by_value_regex():
 def test_scan_no_pii_clean_data():
     df = pd.DataFrame({
         "age": [25, 30, 35],
-        "income": [50000, 60000, 70000],
-        "category": ["A", "B", "C"],
+        "score": [8.5, 9.0, 7.5],
+        "bucket": ["A", "B", "C"],
     })
     result = scan_dataframe(df)
     assert not result.has_pii()
