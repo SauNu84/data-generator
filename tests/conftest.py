@@ -26,7 +26,7 @@ os.environ.setdefault("S3_ENDPOINT_URL", "http://localhost:9000")
 os.environ.setdefault("S3_BUCKET_NAME", "test-bucket")
 
 from app.database import Base, get_db
-from app.deps import get_current_user_or_api_key
+from app.deps import get_current_user, get_current_user_or_api_key, require_pro
 from app.main import app
 from app.models import Dataset, GenerationJob, User
 
@@ -99,6 +99,7 @@ async def auth_client(db_session, test_user):
         return test_user
 
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = override_auth
     app.dependency_overrides[get_current_user_or_api_key] = override_auth
 
     import app.main as main_module
